@@ -14,13 +14,17 @@ import (
 )
 
 var (
-	bgMain    = tcell.GetColor("#0f1115")
-	bgInput   = tcell.GetColor("#14161b")
-	bgSidebar = tcell.GetColor("#0d0f13")
-	fgText    = tcell.ColorWhite
-	fgMuted   = tcell.GetColor("#9aa0a6")
-	fgGreen   = tcell.GetColor("#3bb88a")
-	_         = fgMuted
+	bgMain      = tcell.GetColor("#0f1115")
+	bgInput     = tcell.GetColor("#14161b")
+	bgSidebar   = tcell.GetColor("#0d0f13")
+	fgText      = tcell.ColorWhite
+	fgMuted     = tcell.GetColor("#9aa0a6")
+	fgGreen     = tcell.GetColor("#3bb88a")
+	fgRed       = tcell.GetColor("#f07178")
+	fgPurple    = tcell.GetColor("#c792ea")
+	bgBorder    = tcell.GetColor("#1e2025")
+	bgHighlight = tcell.GetColor("#1e2530")
+	fgCode      = tcell.GetColor("#ffffff")
 )
 
 type turn struct {
@@ -52,11 +56,11 @@ func renderCodeBlocks(text string) (string, string) {
 		lastCode = code
 		lines := strings.Split(code, "\n")
 		var sb strings.Builder
-		sb.WriteString("\n[#3bb88a]  ╔═ code ══════════════════════════════════[-]\n")
+		sb.WriteString(fmt.Sprintf("\n[%s]  ╔═ code ══════════════════════════════════[-]\n", fgGreen.CSS()))
 		for _, line := range lines {
-			sb.WriteString(fmt.Sprintf("[#3bb88a]  ║[-] [#ffffff]%s[-]\n", line))
+			sb.WriteString(fmt.Sprintf("[%s]  ║[-] [%s]%s[-]\n", fgGreen.CSS(), fgCode.CSS(), line))
 		}
-		sb.WriteString("[#3bb88a]  ╚═ ctrl+y to copy ═══════════════════════[-]\n")
+		sb.WriteString(fmt.Sprintf("[%s]  ╚═ ctrl+y to copy ═══════════════════════[-]\n", fgGreen.CSS()))
 		return sb.String()
 	})
 	return result, lastCode
@@ -66,25 +70,25 @@ func formatMessage(role, text string) string {
 	var roleTag string
 	switch role {
 	case "user":
-		roleTag = "[#c792ea]> you[-]"
+		roleTag = fmt.Sprintf("[%s]> you[-]", fgPurple.CSS())
 	case "assistant":
-		roleTag = "[#3bb88a]> guild[-]"
+		roleTag = fmt.Sprintf("[%s]> guild[-]", fgGreen.CSS())
 	case "error":
-		roleTag = "[#f07178]> error[-]"
+		roleTag = fmt.Sprintf("[%s]> error[-]", fgRed.CSS())
 	default:
-		roleTag = fmt.Sprintf("[#9aa0a6]> %s[-]", role)
+		roleTag = fmt.Sprintf("[%s]> %s[-]", fgMuted.CSS(), role)
 	}
 	header := roleTag + "\n"
 	body := "  " + strings.ReplaceAll(text, "\n", "\n  ") + "\n"
-	divider := "[#1e2025]────────────────────────────────────────[-]\n"
+	divider := fmt.Sprintf("[%s]────────────────────────────────────────[-]\n", bgBorder.CSS())
 	return header + body + divider
 }
 
 func formatAssistantMessage(text string) (string, string) {
 	rendered, lastCode := renderCodeBlocks(text)
-	header := "[#3bb88a]> guild[-]\n"
+	header := fmt.Sprintf("[%s]> guild[-]\n", fgGreen.CSS())
 	body := "  " + strings.ReplaceAll(rendered, "\n", "\n  ") + "\n"
-	divider := "[#1e2025]────────────────────────────────────────[-]\n"
+	divider := fmt.Sprintf("[%s]────────────────────────────────────────[-]\n", bgBorder.CSS())
 	return header + body + divider, lastCode
 }
 
@@ -100,10 +104,10 @@ func buildSidebar(entries []prompt.FileEntry, onSelect func(string)) *tview.List
 	list := tview.NewList()
 	list.SetBackgroundColor(bgSidebar)
 	list.SetMainTextColor(fgText)
-	list.SetSelectedBackgroundColor(tcell.GetColor("#1e2530"))
+	list.SetSelectedBackgroundColor(bgHighlight)
 	list.SetSelectedTextColor(fgGreen)
 	list.SetTitle(" files ").SetTitleColor(fgGreen)
-	list.SetBorder(true).SetBorderColor(tcell.GetColor("#1e2025"))
+	list.SetBorder(true).SetBorderColor(bgBorder)
 	list.ShowSecondaryText(false)
 
 	for _, e := range entries {
@@ -164,14 +168,8 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	})
 
 	messages := []string{
-		`[#3bb88a]
-  ██████╗ ██╗   ██╗██╗██╗     ██████╗
- ██╔════╝ ██║   ██║██║██║     ██╔══██╗
- ██║  ███╗██║   ██║██║██║     ██║  ██║
- ██║   ██║██║   ██║██║██║     ██║  ██║
- ╚██████╔╝╚██████╔╝██║███████╗██████╔╝
-  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝`,
-		fmt.Sprintf("[#9aa0a6] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", len(entries)),
+		fmt.Sprintf("[%s]\n  ██████╗ ██╗   ██╗██╗██╗     ██████╗\n ██╔════╝ ██║   ██║██║██║     ██╔══██╗\n ██║  ███╗██║   ██║██║██║     ██║  ██║\n ██║   ██║██║   ██║██║██║     ██║  ██║\n ╚██████╔╝╚██████╔╝██║███████╗██████╔╝\n  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝", fgGreen.CSS()),
+		fmt.Sprintf("[%s] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
 	}
 	updateChat(chatView, messages)
 
@@ -216,7 +214,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		copy(historySnapshot, history)
 		messages = append(messages, formatMessage("user", input))
 		updateChat(chatView, messages)
-		statusBar.SetText("  [#9aa0a6]thinking...[-]")
+		statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgMuted.CSS()))
 		mu.Unlock()
 
 		go func(snapshot []turn) {
@@ -250,7 +248,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				defer mu.Unlock()
 				if err != nil {
 					messages = append(messages, formatMessage("error", err.Error()))
-					statusBar.SetText("  [#f07178]" + err.Error() + "[-]")
+					statusBar.SetText(fmt.Sprintf("  [%s]%s[-]", fgRed.CSS(), err.Error()))
 				} else {
 					history = append(history, turn{role: "assistant", content: response})
 					formatted, codeBlock := formatAssistantMessage(response)
@@ -303,7 +301,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 		case tcell.KeyCtrlY:
 			if lastCodeBlock == "" {
-				statusBar.SetText("  [#9aa0a6]no code block to copy[-]")
+				statusBar.SetText(fmt.Sprintf("  [%s]no code block to copy[-]", fgMuted.CSS()))
 			} else {
 				statusBar.SetText(CopyToClipboard(lastCodeBlock))
 			}
