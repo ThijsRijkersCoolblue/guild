@@ -19,7 +19,6 @@ func agentAsk(
 	app *tview.Application,
 	onFileWritten func(),
 ) (string, error) {
-	// Build prompt from full history so the model has context of past turns
 	conversation := historyToPrompt(*systemPrompt, history)
 	var completedActions []string
 
@@ -31,7 +30,6 @@ func agentAsk(
 
 		a := ParseAction(response)
 		if a == nil {
-			// No more actions — build final response with action summaries prepended
 			finalText := StripActions(response)
 			if len(completedActions) > 0 {
 				finalText = strings.Join(completedActions, "\n") + "\n\n" + finalText
@@ -63,7 +61,6 @@ func agentAsk(
 			if err := WriteFile(a.Path, a.Content); err != nil {
 				conversation += fmt.Sprintf("assistant: %s\n\nsystem: write_file failed: %v. Try again.\n\n", text, err)
 			} else {
-				// Success — feed result back and keep looping so model can do follow-up actions
 				completedActions = append(completedActions, fmt.Sprintf("written to %s", a.Path))
 				onFileWritten()
 				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
@@ -84,7 +81,6 @@ func agentAsk(
 			} else if err := ReplaceInFile(a.Path, a.Old, a.New); err != nil {
 				conversation += fmt.Sprintf("assistant: %s\n\nsystem: replace_in_file failed: %v\n\n", text, err)
 			} else {
-				// Success — keep looping for follow-up actions
 				completedActions = append(completedActions, fmt.Sprintf("updated %s", a.Path))
 				onFileWritten()
 				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)

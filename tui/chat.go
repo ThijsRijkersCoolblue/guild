@@ -220,7 +220,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		mu.Unlock()
 
 		go func(snapshot []turn) {
-			// refreshProject rebuilds the file tree and updates the system prompt + sidebar
 			refreshProject := func() {
 				newEntries, err := prompt.BuildFileList(".")
 				if err != nil {

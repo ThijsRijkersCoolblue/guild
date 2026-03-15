@@ -19,13 +19,11 @@ var ignoredExts = map[string]bool{
 	".gz": true, ".sum": true, ".lock": true,
 }
 
-// FileEntry represents a single file in the project.
 type FileEntry struct {
 	Path    string
 	RelPath string
 }
 
-// BuildFileList walks the given root and returns all relevant files.
 func BuildFileList(root string) ([]FileEntry, error) {
 	var entries []FileEntry
 
@@ -57,7 +55,6 @@ func BuildFileList(root string) ([]FileEntry, error) {
 	return entries, err
 }
 
-// Build constructs the full system prompt, injecting the file tree.
 func Build(entries []FileEntry) string {
 	var sb strings.Builder
 
@@ -101,7 +98,6 @@ PROJECT FILES:
 	return sb.String()
 }
 
-// ReadFile reads a file and returns its content as a string.
 func ReadFile(path string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {

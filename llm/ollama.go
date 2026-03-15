@@ -3,9 +3,9 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
-	"encoding/json"
 	"net/http"
 )
 
@@ -32,36 +32,36 @@ type ollamaResponse struct {
 }
 
 func (c *OllamaClient) Ask(ctx context.Context, prompt string) (string, error) {
-    reqBody, err := json.Marshal(ollamaRequest{
-        Model:  c.model,
-        Prompt: prompt,
-        Stream: false,
-    })
-    if err != nil {
-        return "", err
-    }
+	reqBody, err := json.Marshal(ollamaRequest{
+		Model:  c.model,
+		Prompt: prompt,
+		Stream: false,
+	})
+	if err != nil {
+		return "", err
+	}
 
-    req, err := http.NewRequestWithContext(ctx, "POST", c.url, bytes.NewBuffer(reqBody))
-    if err != nil {
-        return "", err
-    }
-    req.Header.Set("Content-Type", "application/json")
+	req, err := http.NewRequestWithContext(ctx, "POST", c.url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return "", err
-    }
-    defer resp.Body.Close()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
 
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return "", err
-    }
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
 
-    var parsed ollamaResponse
-    if err := json.Unmarshal(body, &parsed); err != nil {
-        return "", fmt.Errorf("failed to parse Ollama response: %w", err)
-    }
+	var parsed ollamaResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("failed to parse Ollama response: %w", err)
+	}
 
-    return parsed.Response, nil
+	return parsed.Response, nil
 }
