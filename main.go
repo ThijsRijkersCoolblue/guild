@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
 	"guild/llm"
 	"guild/tui"
+	"log"
 )
 
 func main() {

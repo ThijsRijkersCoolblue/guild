@@ -1,15 +1,15 @@
 package tui
 
 import (
-    "os"
-    "strings"
+	"os"
+	"strings"
 )
 
-func readFileOS(path string) ([]byte, error) {
-    return os.ReadFile(path)
+func ReadFileOS(path string) ([]byte, error) {
+	return os.ReadFile(path)
 }
 
-func writeFileOS(path string, data []byte) error {
-    normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
-    return os.WriteFile(path, []byte(normalized), 0644)
+func WriteFileOS(path string, data []byte) error {
+	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+	return os.WriteFile(path, []byte(normalized), 0644)
 }
