@@ -6,6 +6,7 @@ import (
 	"guild/llm"
 	"guild/prompt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -14,17 +15,18 @@ import (
 )
 
 var (
-	bgMain      = tcell.GetColor("#0f1115")
-	bgInput     = tcell.GetColor("#14161b")
-	bgSidebar   = tcell.GetColor("#0d0f13")
-	fgText      = tcell.ColorWhite
-	fgMuted     = tcell.GetColor("#9aa0a6")
-	fgGreen     = tcell.GetColor("#3bb88a")
-	fgRed       = tcell.GetColor("#f07178")
-	fgPurple    = tcell.GetColor("#c792ea")
-	bgBorder    = tcell.GetColor("#1e2025")
-	bgHighlight = tcell.GetColor("#1e2530")
-	fgCode      = tcell.GetColor("#ffffff")
+	bgMain      = tcell.GetColor("#242932") // darker than nord0
+	bgInput     = tcell.GetColor("#2e3440") // nord0 - lifted input
+	bgSidebar   = tcell.GetColor("#1c2028") // very dark sidebar
+	fgText      = tcell.GetColor("#eceff4") // nord6 - crisp white text
+	fgMuted     = tcell.GetColor("#4c566a") // nord3 - muted hints
+	fgGreen     = tcell.GetColor("#549897") // deeper frost teal (assistant)
+	fgRed       = tcell.GetColor("#bf616a") // nord11 - red (errors)
+	fgPurple    = tcell.GetColor("#5b7fa6") // deeper frost blue (user)
+	bgBorder    = tcell.GetColor("#485265") // nord0 - subtle border
+	bgHighlight = tcell.GetColor("#373f4f") // dark selection
+	fgCode      = tcell.GetColor("#c6dae1") // light blue code text
+	fgOrange    = tcell.GetColor("#d08770") // nord12 - orange for model indicator
 )
 
 type turn struct {
@@ -72,7 +74,7 @@ func formatMessage(role, text string) string {
 	case "user":
 		roleTag = fmt.Sprintf("[%s]> you[-]", fgPurple.CSS())
 	case "assistant":
-		roleTag = fmt.Sprintf("[%s]> guild[-]", fgGreen.CSS())
+		roleTag = fmt.Sprintf("[%s]> guild[-]", fgOrange.CSS())
 	case "error":
 		roleTag = fmt.Sprintf("[%s]> error[-]", fgRed.CSS())
 	default:
@@ -86,7 +88,7 @@ func formatMessage(role, text string) string {
 
 func formatAssistantMessage(text string) (string, string) {
 	rendered, lastCode := renderCodeBlocks(text)
-	header := fmt.Sprintf("[%s]> guild[-]\n", fgGreen.CSS())
+	header := fmt.Sprintf("[%s]> guild[-]\n", fgOrange.CSS())
 	body := "  " + strings.ReplaceAll(rendered, "\n", "\n  ") + "\n"
 	divider := fmt.Sprintf("[%s]────────────────────────────────────────[-]\n", bgBorder.CSS())
 	return header + body + divider, lastCode
@@ -120,12 +122,32 @@ func buildSidebar(entries []prompt.FileEntry, onSelect func(string)) *tview.List
 	return list
 }
 
-const statusDefault = "  [#9aa0a6]ctrl+c[-] quit   [#9aa0a6]ctrl+l[-] clear   [#9aa0a6]ctrl+b[-] files   [#9aa0a6]ctrl+y[-] copy code   [#9aa0a6]enter[-] send"
-const statusSidebar = "  [#9aa0a6]ctrl+b[-] hide files   [#9aa0a6]ctrl+f[-] focus   [#9aa0a6]esc[-] back to input"
+func modelindicator() string {
+	model := os.Getenv("LLM_MODEL")
+	if model == "" {
+		model = "unknown"
+	}
+	return fmt.Sprintf("[%s]Model:[-] [%s]%s[-]", fgMuted.CSS(), fgOrange.CSS(), model)
+}
+
+const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+b[-] files   [#4c566a]ctrl+y[-] copy code"
+const statusSidebar = "  [#4c566a]ctrl+b[-] hide files   [#4c566a]ctrl+f[-] focus   [#4c566a]esc[-] back to input"
+
+func statusDefault() string {
+	return statusDefaultFmt + "   [#eceff4]│[-]   " + modelindicator()
+}
 
 func StartChat(parentCtx context.Context, client llm.LLM) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
+
+	// Force true color in WSL — tcell often fails to detect it automatically
+	if os.Getenv("COLORTERM") == "" {
+		os.Setenv("COLORTERM", "truecolor")
+	}
+	if os.Getenv("TERM") == "" {
+		os.Setenv("TERM", "xterm-256color")
+	}
 
 	entries, err := prompt.BuildFileList(".")
 	if err != nil {
@@ -155,7 +177,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	statusBar := tview.NewTextView()
 	statusBar.SetDynamicColors(true)
 	statusBar.SetBackgroundColor(bgInput)
-	statusBar.SetText(statusDefault)
+	statusBar.SetText(statusDefault())
 
 	sidebar := buildSidebar(entries, func(path string) {
 		current := inputField.GetText()
@@ -184,6 +206,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		AddItem(nil, 2, 0, false)
 	inputFlex.SetBackgroundColor(bgInput)
 
+	statusFlex := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(nil, 1, 0, false).
+		AddItem(statusBar, 0, 1, false).
+		AddItem(nil, 2, 0, false)
+	statusFlex.SetBackgroundColor(bgInput)
+
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
 		AddItem(sidebar, 0, 0, false).
@@ -192,7 +221,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	root := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(mainFlex, 0, 1, false).
-		AddItem(statusBar, 1, 0, false).
+		AddItem(statusFlex, 1, 0, false).
 		AddItem(inputFlex, 2, 0, true).
 		AddItem(nil, 1, 0, false)
 
@@ -256,7 +285,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 						lastCodeBlock = codeBlock
 					}
 					messages = append(messages, formatted)
-					statusBar.SetText(statusDefault)
+					statusBar.SetText(statusDefault())
 				}
 				updateChat(chatView, messages)
 			})
@@ -285,7 +314,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				statusBar.SetText(statusSidebar)
 			} else {
 				mainFlex.ResizeItem(sidebar, 0, 0)
-				statusBar.SetText(statusDefault)
+				statusBar.SetText(statusDefault())
 				app.SetFocus(inputField)
 			}
 			return nil
