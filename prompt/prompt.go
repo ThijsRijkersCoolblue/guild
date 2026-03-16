@@ -58,7 +58,7 @@ func BuildFileList(root string) ([]FileEntry, error) {
 func Build(entries []FileEntry) string {
 	var sb strings.Builder
 
-	sb.WriteString(`You are guild, an AI coding assistant running inside a terminal.
+	sb.WriteString(`You are an AI coding assistant running inside a terminal.
 You are working directly inside the user's project. You have the ability to read and modify files.
 
 CRITICAL RULES - YOU MUST FOLLOW THESE WITHOUT EXCEPTION:
