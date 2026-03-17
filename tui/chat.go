@@ -102,26 +102,6 @@ func updateChat(view *tview.TextView, messages []string) {
 	view.ScrollToEnd()
 }
 
-func buildSidebar(entries []prompt.FileEntry, onSelect func(string)) *tview.List {
-	list := tview.NewList()
-	list.SetBackgroundColor(bgSidebar)
-	list.SetMainTextColor(fgText)
-	list.SetSelectedBackgroundColor(bgHighlight)
-	list.SetSelectedTextColor(fgGreen)
-	list.SetTitle(" files ").SetTitleColor(fgGreen)
-	list.SetBorder(true).SetBorderColor(bgBorder)
-	list.ShowSecondaryText(false)
-
-	for _, e := range entries {
-		path := e.RelPath
-		list.AddItem(path, "", 0, func() {
-			onSelect(path)
-		})
-	}
-
-	return list
-}
-
 func modelindicator() string {
 	model := os.Getenv("LLM_MODEL")
 	if model == "" {
@@ -130,8 +110,7 @@ func modelindicator() string {
 	return fmt.Sprintf("[%s]Model:[-] [%s]%s[-]", fgMuted.CSS(), fgOrange.CSS(), model)
 }
 
-const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+b[-] files   [#4c566a]ctrl+y[-] copy code"
-const statusSidebar = "  [#4c566a]ctrl+b[-] hide files   [#4c566a]ctrl+f[-] focus   [#4c566a]esc[-] back to input"
+const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+y[-] copy code"
 
 func statusDefault() string {
 	return statusDefaultFmt + "   [#eceff4]│[-]   " + modelindicator()
@@ -179,16 +158,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	statusBar.SetBackgroundColor(bgInput)
 	statusBar.SetText(statusDefault())
 
-	sidebar := buildSidebar(entries, func(path string) {
-		current := inputField.GetText()
-		if current == "" {
-			inputField.SetText("explain " + path)
-		} else {
-			inputField.SetText(current + " " + path)
-		}
-		app.SetFocus(inputField)
-	})
-
 	messages := []string{
 		fmt.Sprintf("[%s]\n  ██████╗ ██╗   ██╗██╗██╗     ██████╗\n ██╔════╝ ██║   ██║██║██║     ██╔══██╗\n ██║  ███╗██║   ██║██║██║     ██║  ██║\n ██║   ██║██║   ██║██║██║     ██║  ██║\n ╚██████╔╝╚██████╔╝██║███████╗██████╔╝\n  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝", fgGreen.CSS()),
 		fmt.Sprintf("[%s] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
@@ -215,7 +184,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
-		AddItem(sidebar, 0, 0, false).
 		AddItem(chatView, 0, 1, false)
 
 	root := tview.NewFlex().
@@ -224,8 +192,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		AddItem(statusFlex, 1, 0, false).
 		AddItem(inputFlex, 2, 0, true).
 		AddItem(nil, 1, 0, false)
-
-	sidebarVisible := false
 
 	inputField.SetDoneFunc(func(key tcell.Key) {
 		if key != tcell.KeyEnter {
@@ -254,21 +220,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				}
 				newPrompt := prompt.Build(newEntries)
 				*systemPrompt = newPrompt
-				app.QueueUpdateDraw(func() {
-					sidebar.Clear()
-					for _, e := range newEntries {
-						path := e.RelPath
-						sidebar.AddItem(path, "", 0, func() {
-							current := inputField.GetText()
-							if current == "" {
-								inputField.SetText("explain " + path)
-							} else {
-								inputField.SetText(current + " " + path)
-							}
-							app.SetFocus(inputField)
-						})
-					}
-				})
 			}
 			response, err := agentAsk(ctx, client, systemPrompt, snapshot, statusBar, app, refreshProject)
 
@@ -308,24 +259,8 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			return nil
 
 		case tcell.KeyCtrlB:
-			sidebarVisible = !sidebarVisible
-			if sidebarVisible {
-				mainFlex.ResizeItem(sidebar, 28, 0)
-				statusBar.SetText(statusSidebar)
-			} else {
-				mainFlex.ResizeItem(sidebar, 0, 0)
-				statusBar.SetText(statusDefault())
-				app.SetFocus(inputField)
-			}
-			return nil
-
-		case tcell.KeyCtrlF:
-			if !sidebarVisible {
-				sidebarVisible = true
-				mainFlex.ResizeItem(sidebar, 28, 0)
-				statusBar.SetText(statusSidebar)
-			}
-			app.SetFocus(sidebar)
+			statusBar.SetText(statusDefault())
+			app.SetFocus(inputField)
 			return nil
 
 		case tcell.KeyCtrlY:
