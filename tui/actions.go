@@ -10,9 +10,7 @@ import (
 	"runtime"
 	"strings"
 )
-
-var ActionRegex = regexp.MustCompile(`(?s)<action>(.*?)</action>`)
-var ActionRegexUnclosed = regexp.MustCompile(`(?s)<action>(.*?)$`)
+var ActionRegex = regexp.MustCompile("(?s)`*<action>(.*?)</action>`*")
 var CodeBlockRegex = regexp.MustCompile("(?s)```(?:[a-zA-Z]*)\n(.*?)```")
 
 type action struct {
@@ -24,15 +22,12 @@ type action struct {
 }
 
 func ParseAction(response string) *action {
-	cleaned := strings.ReplaceAll(response, "`", "")
+	matches := ActionRegex.FindStringSubmatch(response)
 
-	matches := ActionRegex.FindStringSubmatch(cleaned)
-	if matches == nil {
-		matches = ActionRegexUnclosed.FindStringSubmatch(cleaned)
-	}
 	if matches == nil {
 		return nil
 	}
+ 
 	jsonStr := strings.TrimSpace(matches[1])
 
 	jsonStr = repairJSON(jsonStr)
