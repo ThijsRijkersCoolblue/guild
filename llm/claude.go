@@ -10,10 +10,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-// ToolFunc is a function the agent can call
 type ToolFunc func(input map[string]interface{}) (string, error)
 
-// Tool defines a tool the agent can use
 type Tool struct {
 	Name        string
 	Description string
@@ -39,7 +37,6 @@ func NewClaudeClient(model string, tools ...Tool) (LLM, error) {
 func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 	client := anthropic.NewClient(option.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")))
 
-	// Build tool definitions for the API
 	apiTools := make([]anthropic.ToolUnionParam, len(c.tools))
 	for i, t := range c.tools {
 		apiTools[i] = anthropic.ToolUnionParam{
@@ -51,12 +48,10 @@ func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 		}
 	}
 
-	// Conversation history — grows as the agent loops
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 	}
 
-	// Agentic loop
 	for {
 		msg, err := client.Messages.New(ctx, anthropic.MessageNewParams{
 			Model:     anthropic.Model(c.model),
@@ -68,10 +63,8 @@ func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 			return "", fmt.Errorf("API call failed: %w", err)
 		}
 
-		// Append Claude's response to history
 		messages = append(messages, msg.ToParam())
 
-		// If Claude is done (no more tool calls), return the final text
 		if msg.StopReason == "end_turn" {
 			for _, block := range msg.Content {
 				if block.Type == "text" {
@@ -81,7 +74,6 @@ func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 			return "", errors.New("no text in final response")
 		}
 
-		// Handle tool calls
 		if msg.StopReason == "tool_use" {
 			toolResults := []anthropic.ContentBlockParamUnion{}
 
@@ -102,17 +94,14 @@ func (c *ClaudeClient) Ask(ctx context.Context, prompt string) (string, error) {
 				}
 			}
 
-			// Feed tool results back into the conversation
 			messages = append(messages, anthropic.NewUserMessage(toolResults...))
 			continue
 		}
 
-		// Unexpected stop reason
 		return "", fmt.Errorf("unexpected stop reason: %s", msg.StopReason)
 	}
 }
 
-// dispatchTool finds and runs the matching tool handler
 func (c *ClaudeClient) dispatchTool(name string, input interface{}) (string, error) {
 	inputMap, ok := input.(map[string]interface{})
 	if !ok {
