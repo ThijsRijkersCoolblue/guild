@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	bgMain     = tcell.GetColor("#242932")
-	bgInput    = tcell.GetColor("#2e3440")
+	bgMain     = tcell.GetColor("#16191f")
+	bgInput    = tcell.GetColor("#272c36")
 	fgText     = tcell.GetColor("#eceff4")
 	fgMuted    = tcell.GetColor("#4c566a")
 	fgGreen    = tcell.GetColor("#549897")
@@ -26,7 +26,7 @@ var (
 	fgCode     = tcell.GetColor("#c6dae1")
 	fgOrange   = tcell.GetColor("#d08770")
 	fgYellow   = tcell.GetColor("#ffcb6b")
-	bgProgress = tcell.GetColor("#1e2530")
+	bgProgress = tcell.GetColor("#101319")
 )
 
 type turn struct {
@@ -116,7 +116,6 @@ func statusDefault() string {
 	return statusDefaultFmt + "   [#eceff4]│[-]   " + modelindicator()
 }
 
-// progressPanel manages the collapsible reasoning/step panel shown above the input.
 type progressPanel struct {
 	mu      sync.Mutex
 	view    *tview.TextView
@@ -134,7 +133,6 @@ func newProgressPanel(app *tview.Application) *progressPanel {
 	return &progressPanel{view: view}
 }
 
-// kindIcon returns a short colored icon for a progress event kind.
 func kindIcon(k ProgressKind) string {
 	switch k {
 	case ProgressThinking:
@@ -169,7 +167,7 @@ func (p *progressPanel) push(ev ProgressEvent, app *tview.Application) {
 func (p *progressPanel) render(evs []ProgressEvent) {
 	p.view.Clear()
 
-	// Header label — no fixed-width spanning, avoids overflow on narrow terminals.
+	// Header label, no fixed width spanning, avoids overflow on narrow terminals.
 	fmt.Fprintf(p.view, "[%s]  reasoning[-]\n", fgMuted.CSS())
 
 	// Show last N events so the panel stays compact
@@ -190,19 +188,13 @@ func (p *progressPanel) render(evs []ProgressEvent) {
 		icon := kindIcon(ev.Kind)
 
 		if ev.Detail != "" {
-			// Truncate long detail lines to keep the panel clean
-			detail := ev.Detail
-			if len(detail) > 60 {
-				detail = detail[:57] + "…"
-			}
-			fmt.Fprintf(p.view, "%s%s  [%s]%s[-]\n", prefix, icon, fgMuted.CSS(), detail)
+			fmt.Fprintf(p.view, "%s%s  [%s]%s[-]\n", prefix, icon, fgMuted.CSS(), ev.Detail)
 		} else {
 			fmt.Fprintf(p.view, "%s%s\n", prefix, icon)
 		}
 	}
 }
 
-// clear resets state. Safe to call from the main goroutine — does not queue a draw.
 func (p *progressPanel) clear() {
 	p.mu.Lock()
 	p.events = nil
@@ -292,8 +284,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		SetDirection(tview.FlexColumn).
 		AddItem(chatView, 0, 1, false)
 
-	// progressFlex wraps the reasoning panel. Always present in the layout tree;
-	// shown/hidden by resizing between 0 and progressHeight via ResizeItem.
 	const progressHeight = 10
 	progressFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
@@ -302,15 +292,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		AddItem(nil, 2, 0, false)
 	progressFlex.SetBackgroundColor(bgProgress)
 
-	// Single static root — never rebuilt, never replaced.
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainFlex, 0, 1, false).
-		AddItem(progressFlex, 0, 0, false). // height 0 = hidden initially
+		AddItem(progressFlex, 0, 0, false). 
 		AddItem(statusFlex, 1, 0, false).
 		AddItem(inputFlex, 2, 0, true).
 		AddItem(nil, 1, 0, false)
 
-	// showProgress resizes the panel row without touching SetRoot.
 	showProgress := func(visible bool) {
 		if visible {
 			root.ResizeItem(progressFlex, progressHeight, 0)
@@ -329,7 +317,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			return
 		}
 
-		// All of this runs on the main goroutine — direct UI writes, no queuing.
 		inputField.SetText("")
 		mu.Lock()
 		history = append(history, turn{role: "user", content: input})
@@ -340,7 +327,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgMuted.CSS()))
 		mu.Unlock()
 
-		// Reset and show progress panel — direct writes, no QueueUpdateDraw.
 		pp.clear()
 		pp.visible = true
 		showProgress(true)
@@ -357,7 +343,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 			onProgress := func(ev ProgressEvent) {
 				pp.push(ev, app)
-				// Mirror key events to the status bar
 				app.QueueUpdateDraw(func() {
 					switch ev.Kind {
 					case ProgressThinking:
