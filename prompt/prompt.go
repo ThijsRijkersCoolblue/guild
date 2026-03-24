@@ -19,9 +19,21 @@ var ignoredExts = map[string]bool{
 	".gz": true, ".sum": true, ".lock": true,
 }
 
+const maxFileBytes = 8000
+
 type FileEntry struct {
 	Path    string
 	RelPath string
+}
+
+// treeNode is used to build a compact directory tree for the prompt.
+type treeNode struct {
+	children map[string]*treeNode
+	isFile   bool
+}
+
+func newNode() *treeNode {
+	return &treeNode{children: make(map[string]*treeNode)}
 }
 
 func BuildFileList(root string) ([]FileEntry, error) {
@@ -55,6 +67,54 @@ func BuildFileList(root string) ([]FileEntry, error) {
 	return entries, err
 }
 
+// buildTree converts a flat file list into a nested treeNode for compact rendering.
+func buildTree(entries []FileEntry) *treeNode {
+	root := newNode()
+	for _, e := range entries {
+		parts := strings.Split(filepath.ToSlash(e.RelPath), "/")
+		cur := root
+		for i, p := range parts {
+			if _, ok := cur.children[p]; !ok {
+				cur.children[p] = newNode()
+			}
+			if i == len(parts)-1 {
+				cur.children[p].isFile = true
+			}
+			cur = cur.children[p]
+		}
+	}
+	return root
+}
+
+// renderTree writes a compact indented tree into sb.
+func renderTree(sb *strings.Builder, node *treeNode, prefix string, name string) {
+	if name != "" {
+		sb.WriteString(prefix + name)
+		if !node.isFile {
+			sb.WriteString("/")
+		}
+		sb.WriteString("\n")
+		prefix += "  "
+	}
+	// Sort keys for deterministic output.
+	keys := make([]string, 0, len(node.children))
+	for k := range node.children {
+		keys = append(keys, k)
+	}
+	// Simple insertion sort — file lists are small.
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	for _, k := range keys {
+		renderTree(sb, node.children[k], prefix, k)
+	}
+}
+
+// Build returns the static system prompt. Pass this as the `system` field to
+// the LLM API (not injected into messages) so the provider can cache it
+// between turns — Anthropic charges ~10% for cache hits.
 func Build(entries []FileEntry) string {
 	var sb strings.Builder
 	sb.WriteString(`You are an AI coding assistant running inside a terminal.
@@ -90,18 +150,22 @@ WORKFLOW:
 7. NEVER use emojis in your responses
 8. NEVER create or modify files unless the user explicitly asks you to
 
-PROJECT FILES (for reference when answering questions or locating code — do not read or modify unless asked):
+PROJECT FILES:
 `)
-	for _, e := range entries {
-		sb.WriteString(fmt.Sprintf("  %s\n", e.RelPath))
-	}
+	tree := buildTree(entries)
+	renderTree(&sb, tree, "", "")
 	return sb.String()
 }
 
+// ReadFile reads a file, capping at maxFileBytes to avoid flooding the context window.
 func ReadFile(path string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
+	}
+	if len(content) > maxFileBytes {
+		return fmt.Sprintf("%s\n\n[file truncated at %d bytes — ask to see more if needed]",
+			string(content[:maxFileBytes]), maxFileBytes), nil
 	}
 	return string(content), nil
 }

@@ -8,23 +8,40 @@ import (
 	"strings"
 )
 
-// ProgressKind describes the type of a progress event.
 type ProgressKind string
 
 const (
-	ProgressThinking  ProgressKind = "thinking"
-	ProgressReading   ProgressKind = "reading"
-	ProgressWriting   ProgressKind = "writing"
-	ProgressUpdating  ProgressKind = "updating"
-	ProgressDone      ProgressKind = "done"
-	ProgressError     ProgressKind = "error"
+	ProgressThinking ProgressKind = "thinking"
+	ProgressReading  ProgressKind = "reading"
+	ProgressWriting  ProgressKind = "writing"
+	ProgressUpdating ProgressKind = "updating"
+	ProgressDone     ProgressKind = "done"
+	ProgressError    ProgressKind = "error"
 )
 
-// ProgressEvent is emitted by agentAsk to describe what the agent is doing right now.
 type ProgressEvent struct {
 	Kind    ProgressKind
-	Detail  string // file path, error message, or reasoning snippet
-	Attempt int    // which loop iteration (1-based)
+	Detail  string
+	Attempt int
+}
+
+const fileContentMarker = "system: Contents of "
+
+func evictFileContent(conversation, path string) string {
+	startMarker := fmt.Sprintf("system: Contents of %s:\n```\n", path)
+	startIdx := strings.Index(conversation, startMarker)
+	if startIdx == -1 {
+		return conversation
+	}
+	endMarker := "\n```\n"
+	endIdx := strings.Index(conversation[startIdx+len(startMarker):], endMarker)
+	if endIdx == -1 {
+		return conversation
+	}
+	endIdx += startIdx + len(startMarker) + len(endMarker)
+
+	replacement := fmt.Sprintf("system: [contents of %s loaded and applied]\n", path)
+	return conversation[:startIdx] + replacement + conversation[endIdx:]
 }
 
 func agentAsk(
@@ -41,7 +58,13 @@ func agentAsk(
 		}
 	}
 
-	var completedActions []string
+	// actionLog tracks a short human-readable summary of completed operations.
+	// It is appended to the final response so the caller sees what was done.
+	var actionLog []string
+
+	// conversation is built once from history and extended incrementally.
+	// We never rebuild it from scratch after a successful write, instead we
+	// append a compact tail and evict stale file content, keeping the window small.
 	conversation := historyToPrompt(*systemPrompt, history)
 
 	for attempt := range 10 {
@@ -67,8 +90,8 @@ func agentAsk(
 		a := ParseAction(response)
 		if a == nil {
 			finalText := StripActions(response)
-			if len(completedActions) > 0 {
-				finalText = strings.Join(completedActions, "\n") + "\n\n" + finalText
+			if len(actionLog) > 0 {
+				finalText = strings.Join(actionLog, "\n") + "\n\n" + finalText
 			}
 			emit(ProgressDone, "", n)
 			return strings.TrimSpace(finalText), nil
@@ -82,7 +105,10 @@ func agentAsk(
 			fileContent, err := prompt.ReadFile(a.Path)
 			if err != nil {
 				emit(ProgressError, fmt.Sprintf("read %s: %v", a.Path, err), n)
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: Could not read %s: %v. Try a different path.\n\n", text, a.Path, err)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: Could not read %s: %v. Try a different path.\n\n",
+					text, a.Path, err,
+				)
 			} else {
 				conversation += fmt.Sprintf(
 					"assistant: %s\n\nsystem: Contents of %s:\n```\n%s\n```\nNow apply the change using write_file.\n\n",
@@ -94,12 +120,23 @@ func agentAsk(
 			emit(ProgressWriting, a.Path, n)
 			if err := WriteFile(a.Path, a.Content); err != nil {
 				emit(ProgressError, fmt.Sprintf("write %s: %v", a.Path, err), n)
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: write_file failed: %v. Try again.\n\n", text, err)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: write_file failed: %v. Try again.\n\n",
+					text, err,
+				)
 			} else {
-				completedActions = append(completedActions, fmt.Sprintf("written to %s", a.Path))
+				actionLog = append(actionLog, fmt.Sprintf("written to %s", a.Path))
 				onFileWritten()
-				tail := fmt.Sprintf("assistant: %s\n\nsystem: Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
-				conversation = historyToPrompt(*systemPrompt, history) + tail
+
+				// Evict the now stale file contents from the conversation so they
+				// don't keep consuming tokens on subsequent iterations.
+				conversation = evictFileContent(conversation, a.Path)
+
+				// Append a compact tail, do NOT rebuild from full history.
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n",
+					text, a.Path,
+				)
 			}
 
 		case "replace_in_file":
@@ -107,7 +144,10 @@ func agentAsk(
 			existing, err := prompt.ReadFile(a.Path)
 			if err != nil {
 				emit(ProgressError, fmt.Sprintf("read %s: %v", a.Path, err), n)
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: Could not read %s: %v\n\n", text, a.Path, err)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: Could not read %s: %v\n\n",
+					text, a.Path, err,
+				)
 			} else if !strings.Contains(existing, a.Old) {
 				emit(ProgressError, fmt.Sprintf("old string not found in %s", a.Path), n)
 				conversation += fmt.Sprintf(
@@ -116,12 +156,22 @@ func agentAsk(
 				)
 			} else if err := ReplaceInFile(a.Path, a.Old, a.New); err != nil {
 				emit(ProgressError, fmt.Sprintf("replace %s: %v", a.Path, err), n)
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: replace_in_file failed: %v\n\n", text, err)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: replace_in_file failed: %v\n\n",
+					text, err,
+				)
 			} else {
-				completedActions = append(completedActions, fmt.Sprintf("updated %s", a.Path))
+				actionLog = append(actionLog, fmt.Sprintf("updated %s", a.Path))
 				onFileWritten()
-				tail := fmt.Sprintf("assistant: %s\n\nsystem: Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
-				conversation = historyToPrompt(*systemPrompt, history) + tail
+
+				// Evict the stale file contents loaded for this replace operation.
+				conversation = evictFileContent(conversation, a.Path)
+
+				// Append a compact tail, do NOT rebuild from full history.
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n",
+					text, a.Path,
+				)
 			}
 
 		default:
