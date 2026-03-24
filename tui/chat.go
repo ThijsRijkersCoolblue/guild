@@ -15,22 +15,22 @@ import (
 )
 
 var (
-	bgMain      = tcell.GetColor("#242932") // darker than nord0
-	bgInput     = tcell.GetColor("#2e3440") // nord0 - lifted input
-	bgSidebar   = tcell.GetColor("#1c2028") // very dark sidebar
-	fgText      = tcell.GetColor("#eceff4") // nord6 - crisp white text
-	fgMuted     = tcell.GetColor("#4c566a") // nord3 - muted hints
-	fgGreen     = tcell.GetColor("#549897") // deeper frost teal (assistant)
-	fgRed       = tcell.GetColor("#bf616a") // nord11 - red (errors)
-	fgPurple    = tcell.GetColor("#5b7fa6") // deeper frost blue (user)
-	bgBorder    = tcell.GetColor("#485265") // nord0 - subtle border
-	bgHighlight = tcell.GetColor("#373f4f") // dark selection
-	fgCode      = tcell.GetColor("#c6dae1") // light blue code text
-	fgOrange    = tcell.GetColor("#d08770") // nord12 - orange for model indicator
+	bgMain     = tcell.GetColor("#242932")
+	bgInput    = tcell.GetColor("#2e3440")
+	fgText     = tcell.GetColor("#eceff4")
+	fgMuted    = tcell.GetColor("#4c566a")
+	fgGreen    = tcell.GetColor("#549897")
+	fgRed      = tcell.GetColor("#bf616a")
+	fgPurple   = tcell.GetColor("#5b7fa6")
+	bgBorder   = tcell.GetColor("#485265")
+	fgCode     = tcell.GetColor("#c6dae1")
+	fgOrange   = tcell.GetColor("#d08770")
+	fgYellow   = tcell.GetColor("#ffcb6b")
+	bgProgress = tcell.GetColor("#1e2530")
 )
 
 type turn struct {
-	role    string // "user" or "assistant"
+	role    string
 	content string
 }
 
@@ -110,17 +110,115 @@ func modelindicator() string {
 	return fmt.Sprintf("[%s]Model:[-] [%s]%s[-]", fgMuted.CSS(), fgOrange.CSS(), model)
 }
 
-const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+y[-] copy code"
+const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+y[-] copy code   [#4c566a]ctrl+r[-] reasoning"
 
 func statusDefault() string {
 	return statusDefaultFmt + "   [#eceff4]│[-]   " + modelindicator()
+}
+
+// progressPanel manages the collapsible reasoning/step panel shown above the input.
+type progressPanel struct {
+	mu      sync.Mutex
+	view    *tview.TextView
+	events  []ProgressEvent
+	visible bool
+}
+
+func newProgressPanel(app *tview.Application) *progressPanel {
+	view := tview.NewTextView()
+	view.SetDynamicColors(true)
+	view.SetScrollable(false)
+	view.SetWrap(false)
+	view.SetBackgroundColor(bgProgress)
+	view.SetChangedFunc(func() { app.Draw() })
+	return &progressPanel{view: view}
+}
+
+// kindIcon returns a short colored icon for a progress event kind.
+func kindIcon(k ProgressKind) string {
+	switch k {
+	case ProgressThinking:
+		return fmt.Sprintf("[%s]◆ thinking[-]", fgYellow.CSS())
+	case ProgressReading:
+		return fmt.Sprintf("[%s]↓ read[-]", fgGreen.CSS())
+	case ProgressWriting:
+		return fmt.Sprintf("[%s]↑ write[-]", fgPurple.CSS())
+	case ProgressUpdating:
+		return fmt.Sprintf("[%s]± patch[-]", fgOrange.CSS())
+	case ProgressDone:
+		return fmt.Sprintf("[%s]✓ done[-]", fgGreen.CSS())
+	case ProgressError:
+		return fmt.Sprintf("[%s]✗ error[-]", fgRed.CSS())
+	default:
+		return fmt.Sprintf("[%s]· …[-]", fgMuted.CSS())
+	}
+}
+
+func (p *progressPanel) push(ev ProgressEvent, app *tview.Application) {
+	p.mu.Lock()
+	p.events = append(p.events, ev)
+	evsCopy := make([]ProgressEvent, len(p.events))
+	copy(evsCopy, p.events)
+	p.mu.Unlock()
+
+	app.QueueUpdateDraw(func() {
+		p.render(evsCopy)
+	})
+}
+
+func (p *progressPanel) render(evs []ProgressEvent) {
+	p.view.Clear()
+
+	// Header label — no fixed-width spanning, avoids overflow on narrow terminals.
+	fmt.Fprintf(p.view, "[%s]  reasoning[-]\n", fgMuted.CSS())
+
+	// Show last N events so the panel stays compact
+	const maxShow = 6
+	start := 0
+	if len(evs) > maxShow {
+		start = len(evs) - maxShow
+		fmt.Fprintf(p.view, "[%s]  … %d earlier steps hidden …[-]\n", fgMuted.CSS(), start)
+	}
+
+	for i, ev := range evs[start:] {
+		isLast := (start + i) == len(evs)-1
+		prefix := "  "
+		if isLast {
+			prefix = fmt.Sprintf("[%s]▶[-] ", fgYellow.CSS())
+		}
+
+		icon := kindIcon(ev.Kind)
+
+		if ev.Detail != "" {
+			// Truncate long detail lines to keep the panel clean
+			detail := ev.Detail
+			if len(detail) > 60 {
+				detail = detail[:57] + "…"
+			}
+			fmt.Fprintf(p.view, "%s%s  [%s]%s[-]\n", prefix, icon, fgMuted.CSS(), detail)
+		} else {
+			fmt.Fprintf(p.view, "%s%s\n", prefix, icon)
+		}
+	}
+}
+
+// clear resets state. Safe to call from the main goroutine — does not queue a draw.
+func (p *progressPanel) clear() {
+	p.mu.Lock()
+	p.events = nil
+	p.mu.Unlock()
+	p.view.Clear()
+}
+
+func (p *progressPanel) toggle() bool {
+	p.visible = !p.visible
+	return p.visible
 }
 
 func StartChat(parentCtx context.Context, client llm.LLM) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
-	// Force true color in WSL — tcell often fails to detect it automatically
 	if os.Getenv("COLORTERM") == "" {
 		os.Setenv("COLORTERM", "truecolor")
 	}
@@ -137,6 +235,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	app := tview.NewApplication()
 
+	// ── chat view ────────────────────────────────────────────────────────────
 	chatView := tview.NewTextView()
 	chatView.
 		SetDynamicColors(true).
@@ -147,17 +246,23 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	chatView.SetTextColor(fgText)
 	chatView.SetChangedFunc(func() { app.Draw() })
 
+	// ── progress / reasoning panel ───────────────────────────────────────────
+	pp := newProgressPanel(app)
+
+	// ── input field ──────────────────────────────────────────────────────────
 	inputField := tview.NewInputField().
 		SetFieldWidth(0).
 		SetFieldBackgroundColor(bgInput).
 		SetFieldTextColor(fgText)
 	inputField.SetBackgroundColor(bgInput)
 
+	// ── status bar ───────────────────────────────────────────────────────────
 	statusBar := tview.NewTextView()
 	statusBar.SetDynamicColors(true)
 	statusBar.SetBackgroundColor(bgInput)
 	statusBar.SetText(statusDefault())
 
+	// ── initial welcome messages ─────────────────────────────────────────────
 	messages := []string{
 		fmt.Sprintf("[%s]\n  ██████╗ ██╗   ██╗██╗██╗     ██████╗\n ██╔════╝ ██║   ██║██║██║     ██╔══██╗\n ██║  ███╗██║   ██║██║██║     ██║  ██║\n ██║   ██║██║   ██║██║██║     ██║  ██║\n ╚██████╔╝╚██████╔╝██║███████╗██████╔╝\n  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝", fgGreen.CSS()),
 		fmt.Sprintf("[%s] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
@@ -168,6 +273,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 	var mu sync.Mutex
 	var lastCodeBlock string
 
+	// ── layout helpers ───────────────────────────────────────────────────────
 	inputFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
 		AddItem(nil, 1, 0, false).
@@ -186,13 +292,34 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		SetDirection(tview.FlexColumn).
 		AddItem(chatView, 0, 1, false)
 
-	root := tview.NewFlex().
-		SetDirection(tview.FlexRow).
+	// progressFlex wraps the reasoning panel. Always present in the layout tree;
+	// shown/hidden by resizing between 0 and progressHeight via ResizeItem.
+	const progressHeight = 10
+	progressFlex := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(nil, 1, 0, false).
+		AddItem(pp.view, 0, 1, false).
+		AddItem(nil, 2, 0, false)
+	progressFlex.SetBackgroundColor(bgProgress)
+
+	// Single static root — never rebuilt, never replaced.
+	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainFlex, 0, 1, false).
+		AddItem(progressFlex, 0, 0, false). // height 0 = hidden initially
 		AddItem(statusFlex, 1, 0, false).
 		AddItem(inputFlex, 2, 0, true).
 		AddItem(nil, 1, 0, false)
 
+	// showProgress resizes the panel row without touching SetRoot.
+	showProgress := func(visible bool) {
+		if visible {
+			root.ResizeItem(progressFlex, progressHeight, 0)
+		} else {
+			root.ResizeItem(progressFlex, 0, 0)
+		}
+	}
+
+	// ── input handler ────────────────────────────────────────────────────────
 	inputField.SetDoneFunc(func(key tcell.Key) {
 		if key != tcell.KeyEnter {
 			return
@@ -202,6 +329,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			return
 		}
 
+		// All of this runs on the main goroutine — direct UI writes, no queuing.
 		inputField.SetText("")
 		mu.Lock()
 		history = append(history, turn{role: "user", content: input})
@@ -212,6 +340,11 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgMuted.CSS()))
 		mu.Unlock()
 
+		// Reset and show progress panel — direct writes, no QueueUpdateDraw.
+		pp.clear()
+		pp.visible = true
+		showProgress(true)
+
 		go func(snapshot []turn) {
 			refreshProject := func() {
 				newEntries, err := prompt.BuildFileList(".")
@@ -221,7 +354,25 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				newPrompt := prompt.Build(newEntries)
 				*systemPrompt = newPrompt
 			}
-			response, err := agentAsk(ctx, client, systemPrompt, snapshot, statusBar, app, refreshProject)
+
+			onProgress := func(ev ProgressEvent) {
+				pp.push(ev, app)
+				// Mirror key events to the status bar
+				app.QueueUpdateDraw(func() {
+					switch ev.Kind {
+					case ProgressThinking:
+						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]thinking...[-]"))
+					case ProgressReading:
+						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]reading %s...[-]", ev.Detail))
+					case ProgressWriting:
+						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]writing %s...[-]", ev.Detail))
+					case ProgressUpdating:
+						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]updating %s...[-]", ev.Detail))
+					}
+				})
+			}
+
+			response, err := agentAsk(ctx, client, systemPrompt, snapshot, refreshProject, onProgress)
 
 			app.QueueUpdateDraw(func() {
 				mu.Lock()
@@ -243,6 +394,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		}(historySnapshot)
 	})
 
+	// ── global key capture ────────────────────────────────────────────────────
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyCtrlC:
@@ -253,9 +405,10 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		case tcell.KeyCtrlL:
 			mu.Lock()
 			messages = []string{}
-			history = []turn{} // also clear history so model forgets too
+			history = []turn{}
 			updateChat(chatView, messages)
 			mu.Unlock()
+			pp.clear()
 			return nil
 
 		case tcell.KeyCtrlB:
@@ -269,6 +422,11 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			} else {
 				statusBar.SetText(CopyToClipboard(lastCodeBlock))
 			}
+			return nil
+
+		case tcell.KeyCtrlR:
+			visible := pp.toggle()
+			showProgress(visible)
 			return nil
 
 		case tcell.KeyEscape:
