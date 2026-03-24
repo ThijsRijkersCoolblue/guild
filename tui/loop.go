@@ -19,8 +19,9 @@ func agentAsk(
 	app *tview.Application,
 	onFileWritten func(),
 ) (string, error) {
-	conversation := historyToPrompt(*systemPrompt, history)
 	var completedActions []string
+
+	conversation := historyToPrompt(*systemPrompt, history)
 
 	for range 10 {
 		response, err := client.Ask(ctx, conversation)
@@ -63,7 +64,9 @@ func agentAsk(
 			} else {
 				completedActions = append(completedActions, fmt.Sprintf("written to %s", a.Path))
 				onFileWritten()
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
+
+				tail := fmt.Sprintf("assistant: %s\n\nsystem: Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
+				conversation = historyToPrompt(*systemPrompt, history) + tail
 			}
 
 		case "replace_in_file":
@@ -83,7 +86,9 @@ func agentAsk(
 			} else {
 				completedActions = append(completedActions, fmt.Sprintf("updated %s", a.Path))
 				onFileWritten()
-				conversation += fmt.Sprintf("assistant: %s\n\nsystem: ✅ Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
+
+				tail := fmt.Sprintf("assistant: %s\n\nsystem: Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n", text, a.Path)
+				conversation = historyToPrompt(*systemPrompt, history) + tail
 			}
 
 		default:
