@@ -10,36 +10,115 @@ import (
 	"runtime"
 	"strings"
 )
+
+// FunctionCallRegex matches the standard <function_calls>...<invoke>...</invoke>...</function_calls> format.
+var FunctionCallRegex = regexp.MustCompile(`(?s)<function_calls>\s*(.*?)</function_calls>`)
+var InvokeRegex = regexp.MustCompile(`(?s)<invoke\s+name="([^"]+)">\s*(.*?)</invoke>`)
+var ParamRegex = regexp.MustCompile(`(?s)<parameter\s+name="([^"]+)">(.*?)</parameter>`)
+
+// Legacy ActionRegex kept for backward compatibility.
 var ActionRegex = regexp.MustCompile("(?s)`*<action>(.*?)</action>`*")
 var CodeBlockRegex = regexp.MustCompile("(?s)```(?:[a-zA-Z]*)\n(.*?)```")
 
 type action struct {
-	Type    string `json:"type"`
-	Path    string `json:"path"`
-	Content string `json:"content"`
-	Old     string `json:"old"`
-	New     string `json:"new"`
+	Type    string
+	Path    string
+	Content string
+	Old     string
+	New     string
 }
 
 func ParseAction(response string) *action {
-	matches := ActionRegex.FindStringSubmatch(response)
+	// Try the standard <function_calls> format first.
+	if a := parseFunctionCall(response); a != nil {
+		return a
+	}
+	// Fall back to legacy <action>{JSON}</action> format.
+	return parseLegacyAction(response)
+}
 
+// parseFunctionCall parses <function_calls><invoke name="..."><parameter name="...">...</parameter></invoke></function_calls>
+func parseFunctionCall(response string) *action {
+	fcMatch := FunctionCallRegex.FindStringSubmatch(response)
+	if fcMatch == nil {
+		return nil
+	}
+
+	invokeMatch := InvokeRegex.FindStringSubmatch(fcMatch[1])
+	if invokeMatch == nil {
+		return nil
+	}
+
+	toolName := invokeMatch[1]
+	paramsBlock := invokeMatch[2]
+
+	params := make(map[string]string)
+	paramMatches := ParamRegex.FindAllStringSubmatch(paramsBlock, -1)
+	for _, m := range paramMatches {
+		params[m[1]] = m[2]
+	}
+
+	a := &action{Type: toolName}
+
+	switch toolName {
+	case "read_file":
+		a.Path = params["path"]
+		if a.Path == "" {
+			return nil
+		}
+	case "write_file":
+		a.Path = params["path"]
+		a.Content = params["content"]
+		if a.Path == "" {
+			return nil
+		}
+	case "replace_in_file":
+		a.Path = params["path"]
+		a.Old = params["old"]
+		a.New = params["new"]
+		if a.Path == "" || a.Old == "" {
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	return a
+}
+
+// parseLegacyAction parses the old <action>{"type":"...", ...}</action> JSON format.
+func parseLegacyAction(response string) *action {
+	matches := ActionRegex.FindStringSubmatch(response)
 	if matches == nil {
 		return nil
 	}
- 
-	jsonStr := strings.TrimSpace(matches[1])
 
+	jsonStr := strings.TrimSpace(matches[1])
 	jsonStr = repairJSON(jsonStr)
 
-	var a action
-	if err := json.Unmarshal([]byte(jsonStr), &a); err != nil {
+	// Use a temporary struct for JSON unmarshaling since the main action struct
+	// no longer has json tags (fields are populated directly from XML params).
+	var parsed struct {
+		Type    string `json:"type"`
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		Old     string `json:"old"`
+		New     string `json:"new"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		return nil
 	}
-	if a.Type == "" {
+	if parsed.Type == "" {
 		return nil
 	}
-	return &a
+	return &action{
+		Type:    parsed.Type,
+		Path:    parsed.Path,
+		Content: parsed.Content,
+		Old:     parsed.Old,
+		New:     parsed.New,
+	}
 }
 
 func repairJSON(s string) string {
@@ -88,6 +167,9 @@ func CopyToClipboard(text string) string {
 	return fmt.Sprintf("  [#ffcb6b]clipboard unavailable — saved to %s[-]", path)
 }
 
+// StripActions removes both <function_calls>...</function_calls> and legacy <action>...</action> blocks from the response.
 func StripActions(response string) string {
-	return strings.TrimSpace(ActionRegex.ReplaceAllString(response, ""))
+	s := FunctionCallRegex.ReplaceAllString(response, "")
+	s = ActionRegex.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }
