@@ -134,7 +134,7 @@ func agentAsk(
 
 				// Append a compact tail, do NOT rebuild from full history.
 				conversation += fmt.Sprintf(
-					"assistant: %s\n\nsystem: Successfully written to %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n",
+					"assistant: %s\n\nsystem: Successfully written to %s. If you have more files to change, do them now. Otherwise respond with a brief summary.\n\n",
 					text, a.Path,
 				)
 			}
@@ -169,7 +169,7 @@ func agentAsk(
 
 				// Append a compact tail, do NOT rebuild from full history.
 				conversation += fmt.Sprintf(
-					"assistant: %s\n\nsystem: Successfully updated %s. If you have more actions to perform, do them now. Otherwise respond with a plain summary of what you did.\n\n",
+					"assistant: %s\n\nsystem: Successfully updated %s. If you have more files to change, do them now. Otherwise respond with a brief summary.\n\n",
 					text, a.Path,
 				)
 			}
