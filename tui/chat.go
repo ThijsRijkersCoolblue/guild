@@ -23,8 +23,6 @@ var (
 	fgRed      = tcell.GetColor("#eb6f92")
 	fgBlue     = tcell.GetColor("#9ccfd8")
 	bgBorder   = tcell.GetColor("#403d52")
-	fgCode     = tcell.GetColor("#e0def4")
-	fgOrange   = tcell.GetColor("#f6c177")
 	fgYellow   = tcell.GetColor("#f6c177")
 	bgProgress = tcell.GetColor("#13111e")
 )
@@ -60,7 +58,7 @@ func renderCodeBlocks(text string) (string, string) {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("\n[%s]  ╭─ code[-]\n", fgBlue.CSS()))
 		for _, line := range lines {
-			sb.WriteString(fmt.Sprintf("[%s]  │[-] [%s]%s[-]\n", fgBlue.CSS(), fgCode.CSS(), line))
+			sb.WriteString(fmt.Sprintf("[%s]  │[-] [%s]%s[-]\n", fgBlue.CSS(), fgText.CSS(), line))
 		}
 		sb.WriteString(fmt.Sprintf("[%s]  ╰─ ctrl+y copies this block[-]\n", fgBlue.CSS()))
 		return sb.String()
@@ -110,10 +108,13 @@ func modelindicator() string {
 	return fmt.Sprintf("[%s]model:[-] [%s]%s[-]", fgMuted.CSS(), fgBlue.CSS(), model)
 }
 
-const statusDefaultFmt = "  [#6e6a86]ctrl+c[-] quit   [#6e6a86]ctrl+l[-] clear   [#6e6a86]ctrl+y[-] copy code   [#6e6a86]ctrl+r[-] reasoning"
+func statusDefaultFmt() string {
+	return fmt.Sprintf("  [%s]ctrl+c[-] quit   [%s]ctrl+l[-] clear   [%s]ctrl+y[-] copy code   [%s]ctrl+r[-] reasoning",
+		fgMuted.CSS(), fgMuted.CSS(), fgMuted.CSS(), fgMuted.CSS())
+}
 
 func statusDefault() string {
-	return statusDefaultFmt + "   [#e0def4]│[-]   " + modelindicator()
+	return statusDefaultFmt() + fmt.Sprintf("   [%s]│[-]   ", fgText.CSS()) + modelindicator()
 }
 
 type progressPanel struct {
@@ -142,7 +143,7 @@ func kindIcon(k ProgressKind) string {
 	case ProgressWriting:
 		return fmt.Sprintf("[%s]↑ write[-]", fgBlue.CSS())
 	case ProgressUpdating:
-		return fmt.Sprintf("[%s]± patch[-]", fgOrange.CSS())
+		return fmt.Sprintf("[%s]± patch[-]", fgYellow.CSS())
 	case ProgressDone:
 		return fmt.Sprintf("[%s]✓ done[-]", fgGreen.CSS())
 	case ProgressError:
@@ -355,13 +356,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				app.QueueUpdateDraw(func() {
 					switch ev.Kind {
 					case ProgressThinking:
-						statusBar.SetText(fmt.Sprintf("  [#f6c177]thinking...[-]"))
+						statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgYellow.CSS()))
 					case ProgressReading:
-						statusBar.SetText(fmt.Sprintf("  [#f6c177]reading %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]reading %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressWriting:
-						statusBar.SetText(fmt.Sprintf("  [#f6c177]writing %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]writing %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressUpdating:
-						statusBar.SetText(fmt.Sprintf("  [#f6c177]updating %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]updating %s...[-]", fgYellow.CSS(), ev.Detail))
 					}
 				})
 			}
