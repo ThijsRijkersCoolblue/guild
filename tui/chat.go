@@ -15,18 +15,18 @@ import (
 )
 
 var (
-	bgMain     = tcell.GetColor("#090C10")
-	bgInput    = tcell.GetColor("#0E1624")
-	fgText     = tcell.GetColor("#E6EDF3")
-	fgMuted    = tcell.GetColor("#8B949E")
-	fgGreen    = tcell.GetColor("#3FB950")
-	fgRed      = tcell.GetColor("#F85149")
-	fgBlue     = tcell.GetColor("#79C0FF")
-	bgBorder   = tcell.GetColor("#30363D")
-	fgCode     = tcell.GetColor("#C9D1D9")
-	fgOrange   = tcell.GetColor("#FFA657")
-	fgYellow   = tcell.GetColor("#D29922")
-	bgProgress = tcell.GetColor("#0B111A")
+	bgMain     = tcell.GetColor("#191724")
+	bgInput    = tcell.GetColor("#1f1d2e")
+	fgText     = tcell.GetColor("#e0def4")
+	fgMuted    = tcell.GetColor("#6e6a86")
+	fgGreen    = tcell.GetColor("#31748f")
+	fgRed      = tcell.GetColor("#eb6f92")
+	fgBlue     = tcell.GetColor("#9ccfd8")
+	bgBorder   = tcell.GetColor("#403d52")
+	fgCode     = tcell.GetColor("#e0def4")
+	fgOrange   = tcell.GetColor("#f6c177")
+	fgYellow   = tcell.GetColor("#f6c177")
+	bgProgress = tcell.GetColor("#13111e")
 )
 
 type turn struct {
@@ -110,10 +110,10 @@ func modelindicator() string {
 	return fmt.Sprintf("[%s]model:[-] [%s]%s[-]", fgMuted.CSS(), fgBlue.CSS(), model)
 }
 
-const statusDefaultFmt = "  [#8b949e]ctrl+c[-] quit   [#8b949e]ctrl+l[-] clear   [#8b949e]ctrl+y[-] copy code   [#8b949e]ctrl+r[-] reasoning"
+const statusDefaultFmt = "  [#6e6a86]ctrl+c[-] quit   [#6e6a86]ctrl+l[-] clear   [#6e6a86]ctrl+y[-] copy code   [#6e6a86]ctrl+r[-] reasoning"
 
 func statusDefault() string {
-	return statusDefaultFmt + "   [#c9d1d9]│[-]   " + modelindicator()
+	return statusDefaultFmt + "   [#e0def4]│[-]   " + modelindicator()
 }
 
 type progressPanel struct {
@@ -290,6 +290,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
+		AddItem(nil, 2, 0, false).
 		AddItem(chatView, 0, 1, false)
 
 	const progressHeight = 10
@@ -354,13 +355,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				app.QueueUpdateDraw(func() {
 					switch ev.Kind {
 					case ProgressThinking:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]thinking...[-]"))
+						statusBar.SetText(fmt.Sprintf("  [#f6c177]thinking...[-]"))
 					case ProgressReading:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]reading %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [#f6c177]reading %s...[-]", ev.Detail))
 					case ProgressWriting:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]writing %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [#f6c177]writing %s...[-]", ev.Detail))
 					case ProgressUpdating:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]updating %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [#f6c177]updating %s...[-]", ev.Detail))
 					}
 				})
 			}
