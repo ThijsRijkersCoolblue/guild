@@ -96,13 +96,13 @@ Important behavior:
 ## Context and token management
 
 - At startup, guild scans the project and builds a file context automatically.
-- Common heavy/noisy directories and binary-like extensions are ignored during context building.
+- Common heavy/noisy directories and binary like extensions are ignored during context building.
 - Large file reads are truncated (currently at 8000 bytes) with a truncation notice.
-- After a file is updated, stale in-memory file content is evicted from the active conversation to reduce token usage.
+- After a file is updated, stale in memory file content is evicted from the active conversation to reduce token usage.
 
 ## Model Strategy
 
-guild is model-agnostic. The backend supports multiple AI providers through a flexible architecture, switching models requires only a change in environment variables. 
+guild is model agnostic. The backend supports multiple AI providers through a flexible architecture, switching models requires only a change in environment variables. 
 
 Provider defaults and fallback behavior:
 
