@@ -6,7 +6,7 @@
  ╚██████╔╝╚██████╔╝██║███████╗██████╔╝
   ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝
 ```
-guild is an AI-powered terminal assistant designed to answer questions, interact through a terminal UI, and make code adjustments.
+guild is an AI powered terminal assistant designed to answer questions, interact through a terminal UI, and make code adjustments.
 
 ## Setup & installation
 
