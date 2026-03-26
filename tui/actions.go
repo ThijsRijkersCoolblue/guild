@@ -158,13 +158,13 @@ func CopyToClipboard(text string) string {
 	if cmd != nil {
 		cmd.Stdin = strings.NewReader(text)
 		if err := cmd.Run(); err == nil {
-			return "  [#3bb88a]copied to clipboard![-]"
+			return fmt.Sprintf("  [%s]copied to clipboard![-]", fgGreen.CSS())
 		}
 	}
 
 	path := CodeCopyPath()
 	_ = os.WriteFile(path, []byte(text), 0644)
-	return fmt.Sprintf("  [#ffcb6b]clipboard unavailable — saved to %s[-]", path)
+	return fmt.Sprintf("  [%s]clipboard unavailable — saved to %s[-]", fgYellow.CSS(), path)
 }
 
 // StripActions removes both <function_calls>...</function_calls> and legacy <action>...</action> blocks from the response.

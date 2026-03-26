@@ -15,18 +15,16 @@ import (
 )
 
 var (
-	bgMain     = tcell.GetColor("#16191f")
-	bgInput    = tcell.GetColor("#272c36")
-	fgText     = tcell.GetColor("#eceff4")
-	fgMuted    = tcell.GetColor("#4c566a")
-	fgGreen    = tcell.GetColor("#549897")
-	fgRed      = tcell.GetColor("#bf616a")
-	fgPurple   = tcell.GetColor("#5b7fa6")
-	bgBorder   = tcell.GetColor("#485265")
-	fgCode     = tcell.GetColor("#c6dae1")
-	fgOrange   = tcell.GetColor("#d08770")
-	fgYellow   = tcell.GetColor("#ffcb6b")
-	bgProgress = tcell.GetColor("#101319")
+	bgMain     = tcell.GetColor("#191724")
+	bgInput    = tcell.GetColor("#1f1d2e")
+	fgText     = tcell.GetColor("#e0def4")
+	fgMuted    = tcell.GetColor("#6e6a86")
+	fgGreen    = tcell.GetColor("#31748f")
+	fgRed      = tcell.GetColor("#eb6f92")
+	fgBlue     = tcell.GetColor("#9ccfd8")
+	bgBorder   = tcell.GetColor("#403d52")
+	fgYellow   = tcell.GetColor("#f6c177")
+	bgProgress = tcell.GetColor("#13111e")
 )
 
 type turn struct {
@@ -58,11 +56,11 @@ func renderCodeBlocks(text string) (string, string) {
 		lastCode = code
 		lines := strings.Split(code, "\n")
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("\n[%s]  ╔═ code ══════════════════════════════════[-]\n", fgGreen.CSS()))
+		sb.WriteString(fmt.Sprintf("\n[%s]  ╭─ code[-]\n", fgBlue.CSS()))
 		for _, line := range lines {
-			sb.WriteString(fmt.Sprintf("[%s]  ║[-] [%s]%s[-]\n", fgGreen.CSS(), fgCode.CSS(), line))
+			sb.WriteString(fmt.Sprintf("[%s]  │[-] [%s]%s[-]\n", fgBlue.CSS(), fgText.CSS(), line))
 		}
-		sb.WriteString(fmt.Sprintf("[%s]  ╚═ ctrl+y to copy ═══════════════════════[-]\n", fgGreen.CSS()))
+		sb.WriteString(fmt.Sprintf("[%s]  ╰─ ctrl+y copies this block[-]\n", fgBlue.CSS()))
 		return sb.String()
 	})
 	return result, lastCode
@@ -72,15 +70,15 @@ func formatMessage(role, text string) string {
 	var roleTag string
 	switch role {
 	case "user":
-		roleTag = fmt.Sprintf("[%s]> you[-]", fgPurple.CSS())
+		roleTag = fmt.Sprintf("[%s]you[-]", fgBlue.CSS())
 	case "assistant":
-		roleTag = fmt.Sprintf("[%s]> guild[-]", fgOrange.CSS())
+		roleTag = fmt.Sprintf("[%s]assistent[-]", fgGreen.CSS())
 	case "error":
-		roleTag = fmt.Sprintf("[%s]> error[-]", fgRed.CSS())
+		roleTag = fmt.Sprintf("[%s]error[-]", fgRed.CSS())
 	default:
-		roleTag = fmt.Sprintf("[%s]> %s[-]", fgMuted.CSS(), role)
+		roleTag = fmt.Sprintf("[%s]%s[-]", fgMuted.CSS(), role)
 	}
-	header := roleTag + "\n"
+	header := fmt.Sprintf("%s [%s]•[-]\n", roleTag, bgBorder.CSS())
 	body := "  " + strings.ReplaceAll(text, "\n", "\n  ") + "\n"
 	divider := fmt.Sprintf("[%s]────────────────────────────────────────[-]\n", bgBorder.CSS())
 	return header + body + divider
@@ -88,7 +86,7 @@ func formatMessage(role, text string) string {
 
 func formatAssistantMessage(text string) (string, string) {
 	rendered, lastCode := renderCodeBlocks(text)
-	header := fmt.Sprintf("[%s]> guild[-]\n", fgOrange.CSS())
+	header := fmt.Sprintf("[%s]assistent[-] [%s]•[-]\n", fgGreen.CSS(), bgBorder.CSS())
 	body := "  " + strings.ReplaceAll(rendered, "\n", "\n  ") + "\n"
 	divider := fmt.Sprintf("[%s]────────────────────────────────────────[-]\n", bgBorder.CSS())
 	return header + body + divider, lastCode
@@ -107,13 +105,16 @@ func modelindicator() string {
 	if model == "" {
 		model = "unknown"
 	}
-	return fmt.Sprintf("[%s]Model:[-] [%s]%s[-]", fgMuted.CSS(), fgOrange.CSS(), model)
+	return fmt.Sprintf("[%s]model:[-] [%s]%s[-]", fgMuted.CSS(), fgBlue.CSS(), model)
 }
 
-const statusDefaultFmt = "  [#4c566a]ctrl+c[-] quit   [#4c566a]ctrl+l[-] clear   [#4c566a]ctrl+y[-] copy code   [#4c566a]ctrl+r[-] reasoning"
+func statusDefaultFmt() string {
+	return fmt.Sprintf("  [%s]ctrl+c[-] quit   [%s]ctrl+l[-] clear   [%s]ctrl+y[-] copy code   [%s]ctrl+r[-] reasoning",
+		fgMuted.CSS(), fgMuted.CSS(), fgMuted.CSS(), fgMuted.CSS())
+}
 
 func statusDefault() string {
-	return statusDefaultFmt + "   [#eceff4]│[-]   " + modelindicator()
+	return statusDefaultFmt() + fmt.Sprintf("   [%s]│[-]   ", fgText.CSS()) + modelindicator()
 }
 
 type progressPanel struct {
@@ -140,9 +141,9 @@ func kindIcon(k ProgressKind) string {
 	case ProgressReading:
 		return fmt.Sprintf("[%s]↓ read[-]", fgGreen.CSS())
 	case ProgressWriting:
-		return fmt.Sprintf("[%s]↑ write[-]", fgPurple.CSS())
+		return fmt.Sprintf("[%s]↑ write[-]", fgBlue.CSS())
 	case ProgressUpdating:
-		return fmt.Sprintf("[%s]± patch[-]", fgOrange.CSS())
+		return fmt.Sprintf("[%s]± patch[-]", fgYellow.CSS())
 	case ProgressDone:
 		return fmt.Sprintf("[%s]✓ done[-]", fgGreen.CSS())
 	case ProgressError:
@@ -168,7 +169,7 @@ func (p *progressPanel) render(evs []ProgressEvent) {
 	p.view.Clear()
 
 	// Header label, no fixed width spanning, avoids overflow on narrow terminals.
-	fmt.Fprintf(p.view, "[%s]  reasoning[-]\n", fgMuted.CSS())
+	fmt.Fprintf(p.view, "[%s]  reasoning trace[-]\n", fgMuted.CSS())
 
 	// Show last N events so the panel stays compact
 	const maxShow = 6
@@ -243,9 +244,12 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	// ── input field ──────────────────────────────────────────────────────────
 	inputField := tview.NewInputField().
+		SetLabel("  > ").
 		SetFieldWidth(0).
 		SetFieldBackgroundColor(bgInput).
 		SetFieldTextColor(fgText)
+	inputField.SetLabelColor(fgBlue)
+	inputField.SetLabelStyle(tcell.StyleDefault.Foreground(fgBlue).Background(bgInput))
 	inputField.SetBackgroundColor(bgInput)
 
 	// ── status bar ───────────────────────────────────────────────────────────
@@ -256,8 +260,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	// ── initial welcome messages ─────────────────────────────────────────────
 	messages := []string{
-		fmt.Sprintf("[%s]\n  ██████╗ ██╗   ██╗██╗██╗     ██████╗\n ██╔════╝ ██║   ██║██║██║     ██╔══██╗\n ██║  ███╗██║   ██║██║██║     ██║  ██║\n ██║   ██║██║   ██║██║██║     ██║  ██║\n ╚██████╔╝╚██████╔╝██║███████╗██████╔╝\n  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝", fgGreen.CSS()),
-		fmt.Sprintf("[%s] \n Loaded %d project files into context.\n Type a message and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
+		fmt.Sprintf("[%s::b]\n%s[-]", fgBlue.CSS(), ` ██████╗ ██╗   ██╗██╗██╗     ██████╗
+██╔════╝ ██║   ██║██║██║     ██╔══██╗
+██║  ███╗██║   ██║██║██║     ██║  ██║
+██║   ██║██║   ██║██║██║     ██║  ██║
+╚██████╔╝╚██████╔╝██║███████╗██████╔╝
+ ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝`),
+		fmt.Sprintf("[%s]\n Connected to workspace with %d files in context.\n Ask anything and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
 	}
 	updateChat(chatView, messages)
 
@@ -282,6 +291,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	mainFlex := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
+		AddItem(nil, 2, 0, false).
 		AddItem(chatView, 0, 1, false)
 
 	const progressHeight = 10
@@ -294,7 +304,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainFlex, 0, 1, false).
-		AddItem(progressFlex, 0, 0, false). 
+		AddItem(progressFlex, 0, 0, false).
 		AddItem(statusFlex, 1, 0, false).
 		AddItem(inputFlex, 2, 0, true).
 		AddItem(nil, 1, 0, false)
@@ -324,7 +334,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		copy(historySnapshot, history)
 		messages = append(messages, formatMessage("user", input))
 		updateChat(chatView, messages)
-		statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgMuted.CSS()))
+		statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgBlue.CSS()))
 		mu.Unlock()
 
 		pp.clear()
@@ -346,13 +356,13 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				app.QueueUpdateDraw(func() {
 					switch ev.Kind {
 					case ProgressThinking:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]thinking...[-]"))
+						statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgYellow.CSS()))
 					case ProgressReading:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]reading %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]reading %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressWriting:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]writing %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]writing %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressUpdating:
-						statusBar.SetText(fmt.Sprintf("  [#ffcb6b]updating %s...[-]", ev.Detail))
+						statusBar.SetText(fmt.Sprintf("  [%s]updating %s...[-]", fgYellow.CSS(), ev.Detail))
 					}
 				})
 			}
