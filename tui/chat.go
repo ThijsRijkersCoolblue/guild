@@ -443,18 +443,6 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			showProgress(visible)
 			return nil
 
-		case tcell.KeyCtrlU:
-			if pp.visible {
-				pp.scrollBy(-4)
-			}
-			return nil
-
-		case tcell.KeyCtrlD:
-			if pp.visible {
-				pp.scrollBy(4)
-			}
-			return nil
-
 		case tcell.KeyEscape:
 			app.SetFocus(inputField)
 			return nil
