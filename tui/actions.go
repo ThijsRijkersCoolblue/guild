@@ -26,6 +26,8 @@ type action struct {
 	Content string
 	Old     string
 	New     string
+	Pattern string
+	Glob    string
 }
 
 func ParseAction(response string) *action {
@@ -61,6 +63,17 @@ func parseFunctionCall(response string) *action {
 	a := &action{Type: toolName}
 
 	switch toolName {
+	case "glob_files":
+		a.Pattern = params["pattern"]
+		if a.Pattern == "" {
+			return nil
+		}
+	case "grep_files":
+		a.Pattern = params["pattern"]
+		a.Glob = params["glob"]
+		if a.Pattern == "" {
+			return nil
+		}
 	case "read_file":
 		a.Path = params["path"]
 		if a.Path == "" {

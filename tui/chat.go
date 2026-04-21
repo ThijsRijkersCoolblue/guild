@@ -127,17 +127,28 @@ type progressPanel struct {
 func newProgressPanel(app *tview.Application) *progressPanel {
 	view := tview.NewTextView()
 	view.SetDynamicColors(true)
-	view.SetScrollable(false)
+	view.SetScrollable(true)
 	view.SetWrap(false)
 	view.SetBackgroundColor(bgProgress)
 	view.SetChangedFunc(func() { app.Draw() })
 	return &progressPanel{view: view}
 }
 
+func (p *progressPanel) scrollBy(delta int) {
+	row, col := p.view.GetScrollOffset()
+	nextRow := row + delta
+	if nextRow < 0 {
+		nextRow = 0
+	}
+	p.view.ScrollTo(nextRow, col)
+}
+
 func kindIcon(k ProgressKind) string {
 	switch k {
 	case ProgressThinking:
 		return fmt.Sprintf("[%s]◆ thinking[-]", fgYellow.CSS())
+	case ProgressSearching:
+		return fmt.Sprintf("[%s]⌕ search[-]", fgBlue.CSS())
 	case ProgressReading:
 		return fmt.Sprintf("[%s]↓ read[-]", fgGreen.CSS())
 	case ProgressWriting:
@@ -171,16 +182,8 @@ func (p *progressPanel) render(evs []ProgressEvent) {
 	// Header label, no fixed width spanning, avoids overflow on narrow terminals.
 	fmt.Fprintf(p.view, "[%s]  reasoning trace[-]\n", fgMuted.CSS())
 
-	// Show last N events so the panel stays compact
-	const maxShow = 6
-	start := 0
-	if len(evs) > maxShow {
-		start = len(evs) - maxShow
-		fmt.Fprintf(p.view, "[%s]  … %d earlier steps hidden …[-]\n", fgMuted.CSS(), start)
-	}
-
-	for i, ev := range evs[start:] {
-		isLast := (start + i) == len(evs)-1
+	for i, ev := range evs {
+		isLast := i == len(evs)-1
 		prefix := "  "
 		if isLast {
 			prefix = fmt.Sprintf("[%s]▶[-] ", fgYellow.CSS())
@@ -194,6 +197,7 @@ func (p *progressPanel) render(evs []ProgressEvent) {
 			fmt.Fprintf(p.view, "%s%s\n", prefix, icon)
 		}
 	}
+	p.view.ScrollToEnd()
 }
 
 func (p *progressPanel) clear() {
@@ -219,11 +223,7 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		os.Setenv("TERM", "xterm-256color")
 	}
 
-	entries, err := prompt.BuildFileList(".")
-	if err != nil {
-		log.Fatalf("could not scan project: %v", err)
-	}
-	systemPromptStr := prompt.Build(entries)
+	systemPromptStr := prompt.Build()
 	systemPrompt := &systemPromptStr
 
 	app := tview.NewApplication()
@@ -266,13 +266,25 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 ██║   ██║██║   ██║██║██║     ██║  ██║
 ╚██████╔╝╚██████╔╝██║███████╗██████╔╝
  ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝`),
-		fmt.Sprintf("[%s]\n Connected to workspace with %d files in context.\n Ask anything and press Enter.\n[-]\n", fgMuted.CSS(), len(entries)),
+		fmt.Sprintf("[%s]\n Connected to workspace.\n Ask anything and press Enter.\n[-]\n", fgMuted.CSS()),
 	}
 	updateChat(chatView, messages)
 
 	var history []turn
 	var mu sync.Mutex
 	var lastCodeBlock string
+	fileContext := map[string]struct{}{}
+
+	currentContextCount := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(fileContext)
+	}
+
+	statusWithContext := func(count int) string {
+		return statusDefault() + fmt.Sprintf("   [%s]│[-]   [%s]context:[-] [%s]%d[-]", fgText.CSS(), fgMuted.CSS(), fgBlue.CSS(), count)
+	}
+	statusBar.SetText(statusWithContext(0))
 
 	// ── layout helpers ───────────────────────────────────────────────────────
 	inputFlex := tview.NewFlex().
@@ -342,13 +354,15 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		showProgress(true)
 
 		go func(snapshot []turn) {
-			refreshProject := func() {
-				newEntries, err := prompt.BuildFileList(".")
-				if err != nil {
-					return
-				}
-				newPrompt := prompt.Build(newEntries)
-				*systemPrompt = newPrompt
+			refreshProject := func() {}
+			onFileContext := func(path string) {
+				app.QueueUpdateDraw(func() {
+					mu.Lock()
+					fileContext[path] = struct{}{}
+					count := len(fileContext)
+					mu.Unlock()
+					statusBar.SetText(statusWithContext(count))
+				})
 			}
 
 			onProgress := func(ev ProgressEvent) {
@@ -357,6 +371,8 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 					switch ev.Kind {
 					case ProgressThinking:
 						statusBar.SetText(fmt.Sprintf("  [%s]thinking...[-]", fgYellow.CSS()))
+					case ProgressSearching:
+						statusBar.SetText(fmt.Sprintf("  [%s]searching %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressReading:
 						statusBar.SetText(fmt.Sprintf("  [%s]reading %s...[-]", fgYellow.CSS(), ev.Detail))
 					case ProgressWriting:
@@ -367,11 +383,11 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 				})
 			}
 
-			response, err := agentAsk(ctx, client, systemPrompt, snapshot, refreshProject, onProgress)
+			response, err := agentAsk(ctx, client, systemPrompt, snapshot, refreshProject, onFileContext, onProgress)
 
 			app.QueueUpdateDraw(func() {
 				mu.Lock()
-				defer mu.Unlock()
+				count := len(fileContext)
 				if err != nil {
 					messages = append(messages, formatMessage("error", err.Error()))
 					statusBar.SetText(fmt.Sprintf("  [%s]%s[-]", fgRed.CSS(), err.Error()))
@@ -382,9 +398,10 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 						lastCodeBlock = codeBlock
 					}
 					messages = append(messages, formatted)
-					statusBar.SetText(statusDefault())
+					statusBar.SetText(statusWithContext(count))
 				}
 				updateChat(chatView, messages)
+				mu.Unlock()
 			})
 		}(historySnapshot)
 	})
@@ -401,13 +418,15 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 			mu.Lock()
 			messages = []string{}
 			history = []turn{}
+			fileContext = map[string]struct{}{}
 			updateChat(chatView, messages)
+			statusBar.SetText(statusWithContext(0))
 			mu.Unlock()
 			pp.clear()
 			return nil
 
 		case tcell.KeyCtrlB:
-			statusBar.SetText(statusDefault())
+			statusBar.SetText(statusWithContext(currentContextCount()))
 			app.SetFocus(inputField)
 			return nil
 
@@ -422,6 +441,18 @@ func StartChat(parentCtx context.Context, client llm.LLM) {
 		case tcell.KeyCtrlR:
 			visible := pp.toggle()
 			showProgress(visible)
+			return nil
+
+		case tcell.KeyCtrlU:
+			if pp.visible {
+				pp.scrollBy(-4)
+			}
+			return nil
+
+		case tcell.KeyCtrlD:
+			if pp.visible {
+				pp.scrollBy(4)
+			}
 			return nil
 
 		case tcell.KeyEscape:

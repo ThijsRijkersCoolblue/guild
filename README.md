@@ -80,8 +80,10 @@ Use `Ctrl+L` to clear the conversation history when starting a new unrelated tas
 
 ## How edits are applied
 
-guild supports three editing actions under the hood:
+guild supports five editing actions under the hood:
 
+- `glob_files`: discovers candidate file paths from glob patterns.
+- `grep_files`: searches matching lines using a regex and optional glob filter.
 - `read_file`: reads a target file before making changes.
 - `write_file`: rewrites a full file with updated content.
 - `replace_in_file`: applies a targeted exact text replacement.
@@ -89,13 +91,14 @@ guild supports three editing actions under the hood:
 Important behavior:
 
 - For reliability, edits are performed in steps (read first, then write/replace).
+- The agent starts with zero project path context and should use `glob_files`/`grep_files` on demand.
 - `replace_in_file` only succeeds when the exact `old` text is found.
 - Successful writes/updates refresh project context automatically.
 - Written files normalize line endings to LF (`\n`) for consistency.
 
 ## Context and token management
 
-- At startup, guild scans the project and builds a file context automatically.
+- Path discovery is on demand using tool calls instead of injecting the full project tree in the system prompt.
 - Common heavy/noisy directories and binary like extensions are ignored during context building.
 - Large file reads are truncated (currently at 8000 bytes) with a truncation notice.
 - After a file is updated, stale in memory file content is evicted from the active conversation to reduce token usage.

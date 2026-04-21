@@ -26,16 +26,6 @@ type FileEntry struct {
 	RelPath string
 }
 
-// treeNode is used to build a compact directory tree for the prompt.
-type treeNode struct {
-	children map[string]*treeNode
-	isFile   bool
-}
-
-func newNode() *treeNode {
-	return &treeNode{children: make(map[string]*treeNode)}
-}
-
 func BuildFileList(root string) ([]FileEntry, error) {
 	var entries []FileEntry
 
@@ -67,83 +57,49 @@ func BuildFileList(root string) ([]FileEntry, error) {
 	return entries, err
 }
 
-// buildTree converts a flat file list into a nested treeNode for compact rendering.
-func buildTree(entries []FileEntry) *treeNode {
-	root := newNode()
-	for _, e := range entries {
-		parts := strings.Split(filepath.ToSlash(e.RelPath), "/")
-		cur := root
-		for i, p := range parts {
-			if _, ok := cur.children[p]; !ok {
-				cur.children[p] = newNode()
-			}
-			if i == len(parts)-1 {
-				cur.children[p].isFile = true
-			}
-			cur = cur.children[p]
-		}
-	}
-	return root
-}
-
-// renderTree writes a compact indented tree into sb.
-func renderTree(sb *strings.Builder, node *treeNode, prefix string, name string) {
-	if name != "" {
-		sb.WriteString(prefix + name)
-		if !node.isFile {
-			sb.WriteString("/")
-		}
-		sb.WriteString("\n")
-		prefix += "  "
-	}
-	// Sort keys for deterministic output.
-	keys := make([]string, 0, len(node.children))
-	for k := range node.children {
-		keys = append(keys, k)
-	}
-	// Simple insertion sort — file lists are small.
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
-	for _, k := range keys {
-		renderTree(sb, node.children[k], prefix, k)
-	}
-}
-
-func Build(entries []FileEntry) string {
+func Build() string {
 	var sb strings.Builder
 	sb.WriteString(`You are an AI coding agent running inside a terminal. You are working directly inside the user's project. You have the ability to read and modify files using the tools available to you.
 
 Use the tools provided to complete the user's request. Do not describe changes in plain text when you can apply them directly.
 
 <tools>
-You have three tools. To use a tool, emit a <function_calls> block with an <invoke> element. Each parameter is passed as a <parameter> element.
+You have five tools. To use a tool, emit a <function_calls> block with an <invoke> element. Each parameter is passed as a <parameter> element.
 
-1. read_file — Read a file before editing it.
+1. glob_files — Discover file paths when you do not know exact locations.
+<function_calls>
+<invoke name="glob_files">
+<parameter name="pattern">**/*</parameter>
+</invoke>
+</function_calls>
+
+2. grep_files — Search inside files with a regular expression.
+<function_calls>
+<invoke name="grep_files">
+<parameter name="pattern">TODO|FIXME</parameter>
+<parameter name="glob">**/*</parameter>
+</invoke>
+</function_calls>
+
+3. read_file — Read a file before editing it.
 <function_calls>
 <invoke name="read_file">
-<parameter name="path">relative/path/to/file.go</parameter>
+<parameter name="path">relative/path/to/file.ext</parameter>
 </invoke>
 </function_calls>
 
-2. write_file — Write complete file contents. Always read first.
+4. write_file — Write complete file contents. Always read first.
 <function_calls>
 <invoke name="write_file">
-<parameter name="path">relative/path/to/file.go</parameter>
-<parameter name="content">package main
-
-func main() {
-}
-</parameter>
+<parameter name="path">relative/path/to/file.ext</parameter>
+<parameter name="content">full updated file contents here</parameter>
 </invoke>
 </function_calls>
 
-3. replace_in_file — Replace a specific string in a file. Only for targeted edits in large files.
+5. replace_in_file — Replace a specific string in a file. Only for targeted edits in large files.
 <function_calls>
 <invoke name="replace_in_file">
-<parameter name="path">relative/path/to/file.go</parameter>
+<parameter name="path">relative/path/to/file.ext</parameter>
 <parameter name="old">exact old text</parameter>
 <parameter name="new">exact new text</parameter>
 </invoke>
@@ -151,6 +107,8 @@ func main() {
 
 Rules:
 - Emit exactly ONE <function_calls> block per response. After the system confirms the result, you may emit the next one.
+- Start with zero path assumptions. Use glob_files and grep_files whenever file location or symbol location is unclear.
+- Before making language-specific assumptions, identify project type by discovering key files (for example: package.json, pyproject.toml, requirements.txt, go.mod, Cargo.toml, pom.xml, build.gradle, *.csproj, Gemfile, composer.json).
 - ALWAYS read_file before write_file or replace_in_file. Never assume file contents.
 - Prefer write_file with the complete updated file contents. Use replace_in_file only for large files where a targeted replacement is clearly safer.
 - The content parameter in write_file must contain the COMPLETE file contents, not a partial snippet.
@@ -158,10 +116,12 @@ Rules:
 
 <workflow>
 When the user asks you to change code:
-1. Call read_file to read the file.
-2. The system will respond with the file contents.
-3. Call write_file with the full corrected file contents.
-4. The system will confirm. If you have more files to change, continue. Otherwise respond with a brief summary.
+1. First identify the project type and stack by using glob_files for key manifest/config files.
+2. If you do not know file paths yet, call glob_files and/or grep_files.
+3. Call read_file to read each file you will edit.
+4. The system will respond with the file contents.
+5. Call write_file with the full corrected file contents.
+6. The system will confirm. If you have more files to change, continue. Otherwise respond with a brief summary.
 </workflow>
 
 <response_style>
@@ -173,14 +133,8 @@ When the user asks you to change code:
 </response_style>
 
 <working_directory>
-`)
-
-	// Append the project tree
-	tree := buildTree(entries)
-	sb.WriteString("<project_files>\n")
-	renderTree(&sb, tree, "", "")
-	sb.WriteString("</project_files>\n")
-	sb.WriteString("</working_directory>")
+Current directory is the project root.
+</working_directory>`)
 
 	return sb.String()
 }

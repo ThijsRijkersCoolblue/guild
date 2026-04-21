@@ -5,18 +5,23 @@ import (
 	"fmt"
 	"guild/llm"
 	"guild/prompt"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 type ProgressKind string
 
 const (
-	ProgressThinking ProgressKind = "thinking"
-	ProgressReading  ProgressKind = "reading"
-	ProgressWriting  ProgressKind = "writing"
-	ProgressUpdating ProgressKind = "updating"
-	ProgressDone     ProgressKind = "done"
-	ProgressError    ProgressKind = "error"
+	ProgressThinking  ProgressKind = "thinking"
+	ProgressSearching ProgressKind = "searching"
+	ProgressReading   ProgressKind = "reading"
+	ProgressWriting   ProgressKind = "writing"
+	ProgressUpdating  ProgressKind = "updating"
+	ProgressDone      ProgressKind = "done"
+	ProgressError     ProgressKind = "error"
 )
 
 type ProgressEvent struct {
@@ -26,6 +31,34 @@ type ProgressEvent struct {
 }
 
 const fileContentMarker = "system: Contents of "
+
+func globMatches(relPath, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || pattern == "**/*" {
+		return true
+	}
+	relPath = filepath.ToSlash(relPath)
+
+	if strings.HasPrefix(pattern, "**/") {
+		suffixPattern := strings.TrimPrefix(pattern, "**/")
+		if strings.Contains(suffixPattern, "/") {
+			ok, _ := path.Match(suffixPattern, relPath)
+			return ok
+		}
+		ok, _ := path.Match(suffixPattern, path.Base(relPath))
+		return ok
+	}
+
+	ok, _ := path.Match(pattern, relPath)
+	if ok {
+		return true
+	}
+	if !strings.Contains(pattern, "/") {
+		ok, _ = path.Match(pattern, path.Base(relPath))
+		return ok
+	}
+	return false
+}
 
 func evictFileContent(conversation, path string) string {
 	startMarker := fmt.Sprintf("system: Contents of %s:\n```\n", path)
@@ -50,6 +83,7 @@ func agentAsk(
 	systemPrompt *string,
 	history []turn,
 	onFileWritten func(),
+	onFileContext func(string),
 	onProgress func(ProgressEvent),
 ) (string, error) {
 	emit := func(kind ProgressKind, detail string, attempt int) {
@@ -100,7 +134,112 @@ func agentAsk(
 		text := StripActions(response)
 
 		switch a.Type {
+		case "glob_files":
+			emit(ProgressSearching, fmt.Sprintf("glob %s", a.Pattern), n)
+			entries, err := prompt.BuildFileList(".")
+			if err != nil {
+				emit(ProgressError, fmt.Sprintf("glob prep failed: %v", err), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: glob_files failed to list files: %v\n\n",
+					text, err,
+				)
+				break
+			}
+
+			pattern := strings.TrimSpace(a.Pattern)
+			if pattern == "" {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: glob_files requires a non-empty pattern.\n\n",
+					text,
+				)
+				break
+			}
+
+			var matches []string
+			for _, e := range entries {
+				relPath := filepath.ToSlash(e.RelPath)
+				if globMatches(relPath, pattern) {
+					matches = append(matches, relPath)
+				}
+			}
+
+			if len(matches) == 0 {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: glob_files found no files for pattern %q.\n\n",
+					text, pattern,
+				)
+			} else {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: glob_files results for pattern %q:\n%s\n\n",
+					text, pattern, strings.Join(matches, "\n"),
+				)
+			}
+
+		case "grep_files":
+			emit(ProgressSearching, fmt.Sprintf("grep %s", a.Pattern), n)
+			entries, err := prompt.BuildFileList(".")
+			if err != nil {
+				emit(ProgressError, fmt.Sprintf("search prep failed: %v", err), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: grep_files failed to list files: %v\n\n",
+					text, err,
+				)
+				break
+			}
+
+			re, err := regexp.Compile(a.Pattern)
+			if err != nil {
+				emit(ProgressError, fmt.Sprintf("invalid regex: %v", err), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: grep_files invalid regex %q: %v\n\n",
+					text, a.Pattern, err,
+				)
+				break
+			}
+
+			globPattern := strings.TrimSpace(a.Glob)
+			if globPattern == "" {
+				globPattern = "**/*"
+			}
+
+			var lines []string
+			for _, e := range entries {
+				relPath := filepath.ToSlash(e.RelPath)
+				if !globMatches(relPath, globPattern) {
+					continue
+				}
+				bytes, err := ReadFileOS(e.Path)
+				if err != nil {
+					continue
+				}
+				for idx, line := range strings.Split(string(bytes), "\n") {
+					if re.MatchString(line) {
+						lines = append(lines, fmt.Sprintf("%s:%d: %s", relPath, idx+1, line))
+					}
+				}
+			}
+
+			if len(lines) == 0 {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: grep_files found no matches for regex %q in %q.\n\n",
+					text, a.Pattern, globPattern,
+				)
+			} else {
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: grep_files matches for regex %q in %q:\n%s\n\n",
+					text, a.Pattern, globPattern, strings.Join(lines, "\n"),
+				)
+			}
+
 		case "read_file":
+			if filepath.IsAbs(a.Path) {
+				emit(ProgressError, fmt.Sprintf("absolute path rejected: %s", a.Path), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: read_file requires a workspace-relative path, got absolute path %q. Use glob_files first.\n\n",
+					text, a.Path,
+				)
+				break
+			}
 			emit(ProgressReading, a.Path, n)
 			fileContent, err := prompt.ReadFile(a.Path)
 			if err != nil {
@@ -110,6 +249,9 @@ func agentAsk(
 					text, a.Path, err,
 				)
 			} else {
+				if onFileContext != nil {
+					onFileContext(a.Path)
+				}
 				conversation += fmt.Sprintf(
 					"assistant: %s\n\nsystem: Contents of %s:\n```\n%s\n```\nNow apply the change using write_file.\n\n",
 					text, a.Path, fileContent,
@@ -117,6 +259,25 @@ func agentAsk(
 			}
 
 		case "write_file":
+			if filepath.IsAbs(a.Path) {
+				emit(ProgressError, fmt.Sprintf("absolute path rejected: %s", a.Path), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: write_file requires a workspace-relative path, got absolute path %q. Use glob_files first.\n\n",
+					text, a.Path,
+				)
+				break
+			}
+			parent := filepath.Dir(a.Path)
+			if parent != "." {
+				if st, err := os.Stat(parent); err != nil || !st.IsDir() {
+					emit(ProgressError, fmt.Sprintf("parent dir missing for %s", a.Path), n)
+					conversation += fmt.Sprintf(
+						"assistant: %s\n\nsystem: write_file failed because parent directory %q does not exist. Use glob_files to find the correct path, or create files only in existing directories.\n\n",
+						text, parent,
+					)
+					break
+				}
+			}
 			emit(ProgressWriting, a.Path, n)
 			if err := WriteFile(a.Path, a.Content); err != nil {
 				emit(ProgressError, fmt.Sprintf("write %s: %v", a.Path, err), n)
@@ -125,6 +286,9 @@ func agentAsk(
 					text, err,
 				)
 			} else {
+				if onFileContext != nil {
+					onFileContext(a.Path)
+				}
 				actionLog = append(actionLog, fmt.Sprintf("written to %s", a.Path))
 				onFileWritten()
 
@@ -140,6 +304,14 @@ func agentAsk(
 			}
 
 		case "replace_in_file":
+			if filepath.IsAbs(a.Path) {
+				emit(ProgressError, fmt.Sprintf("absolute path rejected: %s", a.Path), n)
+				conversation += fmt.Sprintf(
+					"assistant: %s\n\nsystem: replace_in_file requires a workspace-relative path, got absolute path %q. Use glob_files first.\n\n",
+					text, a.Path,
+				)
+				break
+			}
 			emit(ProgressUpdating, a.Path, n)
 			existing, err := prompt.ReadFile(a.Path)
 			if err != nil {
@@ -161,6 +333,9 @@ func agentAsk(
 					text, err,
 				)
 			} else {
+				if onFileContext != nil {
+					onFileContext(a.Path)
+				}
 				actionLog = append(actionLog, fmt.Sprintf("updated %s", a.Path))
 				onFileWritten()
 
